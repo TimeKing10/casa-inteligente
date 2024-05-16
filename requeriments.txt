@@ -1,6 +1,8 @@
+keras
 streamlit
-opencv-python-headless
-google-cloud-speech
+streamlit-webrtc
 numpy
-face-recognition
-requests
+opencv-python-headless
+Pillow
+tensorflow==2.12
+paho-mqtt==1.6.1
