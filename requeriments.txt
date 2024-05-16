@@ -1,0 +1,6 @@
+streamlit
+opencv-python-headless
+google-cloud-speech
+numpy
+face-recognition
+requests
