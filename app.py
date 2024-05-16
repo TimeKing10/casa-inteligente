@@ -1,86 +1,64 @@
+import paho.mqtt.client as paho
+import time
+import json
 import streamlit as st
 import cv2
 import numpy as np
-import face_recognition
-import requests
-import speech_recognition as sr
-from google.cloud import speech
-from PIL import Image
+#from PIL import Image
+from PIL import Image as Image, ImageOps as ImagOps
+from keras.models import load_model
 
-# Configuración de Google Cloud Speech-to-Text
-client = speech.SpeechClient()
+def on_publish(client,userdata,result):             #create function for callback
+    print("el dato ha sido publicado \n")
+    pass
 
-def transcribe_speech(audio_file):
-    with open(audio_file, 'rb') as f:
-        audio_data = f.read()
+def on_message(client, userdata, message):
+    global message_received
+    time.sleep(2)
+    message_received=str(message.payload.decode("utf-8"))
+    st.write(message_received)
 
-    audio = speech.RecognitionAudio(content=audio_data)
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-        sample_rate_hertz=16000,
-        language_code='es-ES'
-    )
+        
 
-    response = client.recognize(config=config, audio=audio)
-    return response.results[0].alternatives[0].transcript if response.results else ""
 
-# Cargar imágenes de caras conocidas
-known_faces = []
-known_names = []
+broker="broker.mqttdashboard.com"
+port=1883
+client1= paho.Client("APP_CERR")
+client1.on_message = on_message
+client1.on_publish = on_publish
+client1.connect(broker,port)
 
-def load_known_faces():
-    import os
-    for filename in os.listdir("known_faces"):
-        image = face_recognition.load_image_file(f"known_faces/{filename}")
-        encoding = face_recognition.face_encodings(image)[0]
-        known_faces.append(encoding)
-        known_names.append(filename.split(".")[0])
+model = load_model('keras_model.h5')
+data = np.ndarray(shape=(1, 224, 224, 3), dtype=np.float32)
 
-load_known_faces()
+st.title("Cerradura Inteligente")
 
-def recognize_face(image):
-    unknown_image = face_recognition.load_image_file(image)
-    unknown_encoding = face_recognition.face_encodings(unknown_image)[0]
+img_file_buffer = st.camera_input("Toma una Foto")
 
-    results = face_recognition.compare_faces(known_faces, unknown_encoding)
-    return any(results)
+if img_file_buffer is not None:
+    # To read image file buffer with OpenCV:
+    data = np.ndarray(shape=(1, 224, 224, 3), dtype=np.float32)
+   #To read image file buffer as a PIL Image:
+    img = Image.open(img_file_buffer)
 
-def control_led(state):
-    url = "https://api.wokwi.com/projects/YOUR_PROJECT_ID/devices/YOUR_DEVICE_ID/led"
-    data = {"state": state}
-    response = requests.post(url, json=data)
-    return response.json()
+    newsize = (224, 224)
+    img = img.resize(newsize)
+    # To convert PIL Image to numpy array:
+    img_array = np.array(img)
 
-# Interfaz de Streamlit
-st.title("Casa Inteligente")
+    # Normalize the image
+    normalized_image_array = (img_array.astype(np.float32) / 127.0) - 1
+    # Load the image into the array
+    data[0] = normalized_image_array
 
-page = st.sidebar.selectbox("Selecciona la página", ["Sistema de Seguridad"])
-
-if page == "Sistema de Seguridad":
-    st.header("Sistema de Seguridad")
-
-    uploaded_image = st.file_uploader("Subir imagen de cámara", type=["jpg", "jpeg", "png"])
-    if uploaded_image:
-        image = Image.open(uploaded_image)
-        st.image(image, caption='Imagen subida', use_column_width=True)
-        if recognize_face(uploaded_image):
-            st.success("Reconocido como el dueño de la casa")
-            st.subheader("Comandos de Voz")
-
-            uploaded_audio = st.file_uploader("Subir archivo de audio", type=["wav"])
-            if uploaded_audio:
-                with open("temp.wav", "wb") as f:
-                    f.write(uploaded_audio.getbuffer())
-                transcription = transcribe_speech("temp.wav")
-                st.write(f"Transcripción: {transcription}")
-
-                if "prender" in transcription.lower():
-                    control_led("on")
-                    st.success("LED prendido")
-                elif "apagar" in transcription.lower():
-                    control_led("off")
-                    st.success("LED apagado")
-                else:
-                    st.error("Comando no reconocido")
-        else:
-            st.error("No reconocido como el dueño de la casa")
+    # run the inference
+    prediction = model.predict(data)
+    print(prediction)
+    if prediction[0][0]>0.3:
+      st.header('Abriendo')
+      client1.publish("IMIA","{'gesto': 'Abre'}",qos=0, retain=False)
+      time.sleep(0.2)
+    if prediction[0][1]>0.3:
+      st.header('Cerrando')
+      client1.publish("IMIA","{'gesto': 'Cierra'}",qos=0, retain=False)
+      time.sleep(0.2)  
